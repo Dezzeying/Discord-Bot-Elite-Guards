@@ -172,28 +172,7 @@ class CloseTicketView(discord.ui.View):
         )
         await channel.send(embed=close_embed, view=TicketArchiveView())
 
-        # Transkript kanalına özet embed — kategori altında bir kanal olmalı
-        # Özet embed'i transcript kategorisinin ilk text kanalına gönder
-        if transcript_category:
-            # Transcript kanalı olarak TRANSCRIPT_CATEGORY_ID altındaki ilk "transkript" adlı kanalı veya ilk text kanalını bul
-            log_ch = discord.utils.find(
-                lambda c: isinstance(c, discord.TextChannel) and "transkript" in c.name.lower(),
-                transcript_category.channels
-            ) or discord.utils.find(
-                lambda c: isinstance(c, discord.TextChannel),
-                transcript_category.channels
-            )
-            if log_ch:
-                summary = discord.Embed(
-                    title="📁 Ticket Arşivlendi",
-                    color=discord.Color.orange(),
-                    timestamp=discord.utils.utcnow(),
-                )
-                summary.add_field(name="Kanal", value=channel.mention, inline=True)
-                summary.add_field(name="Tür", value=ticket_type, inline=True)
-                summary.add_field(name="Açan", value=opener_mention, inline=True)
-                summary.add_field(name="Kapatan", value=member.mention, inline=True)
-                await log_ch.send(embed=summary)
+
 
 
 class TicketPanelView(discord.ui.View):
