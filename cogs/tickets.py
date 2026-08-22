@@ -8,6 +8,10 @@ from discord.ext import commands
 TICKET_CATEGORY_ID = int(os.getenv("TICKET_CATEGORY_ID", "0") or 0)
 KLAN_BASVURU_ROLE_ID = int(os.getenv("KLAN_BASVURU_ROLE_ID", "0") or 0)
 DIGER_TICKET_ROLE_ID = int(os.getenv("DIGER_TICKET_ROLE_ID", "0") or 0)
+TRANSCRIPT_CHANNEL_ID = int(os.getenv("TRANSCRIPT_CHANNEL_ID", "0") or 0)
+
+# Arşivlenmiş ticket'ı görebilecek yönetim rolleri
+ARCHIVE_ROLE_IDS = [999997810546065468, 1410015083131572354, 1529625416724250734]
 
 # Buton id -> (görünen ad, kanal öneki, o türü görecek rol id'si)
 TICKET_TYPES = {
@@ -39,7 +43,10 @@ class CloseTicketView(discord.ui.View):
     )
     async def close_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
         member = interaction.user
-        is_opener = interaction.channel.topic and str(member.id) in interaction.channel.topic
+        channel = interaction.channel
+        guild = interaction.guild
+
+        is_opener = channel.topic and str(member.id) in channel.topic
         has_role = any(r.id in (KLAN_BASVURU_ROLE_ID, DIGER_TICKET_ROLE_ID) for r in getattr(member, "roles", []))
 
         if not (has_role or is_opener or member.guild_permissions.administrator):
@@ -48,10 +55,52 @@ class CloseTicketView(discord.ui.View):
             )
             return
 
-        await interaction.response.send_message("Closing this ticket in 5 seconds...")
-        await interaction.channel.edit(name=f"closed-{interaction.channel.name}"[:100])
-        await discord.utils.sleep_until(discord.utils.utcnow() + datetime.timedelta(seconds=5))
-        await interaction.channel.delete(reason=f"Ticket closed by: {member}")
+        await interaction.response.defer()
+
+        # 1. Kanalı kilitle ve sadece yönetim rollerine bırak
+        overwrites = {
+            guild.default_role: discord.PermissionOverwrite(view_channel=False),
+            guild.me: discord.PermissionOverwrite(view_channel=True, send_messages=True, manage_channels=True),
+        }
+        for role_id in ARCHIVE_ROLE_IDS:
+            role = guild.get_role(role_id)
+            if role:
+                overwrites[role] = discord.PermissionOverwrite(view_channel=True, send_messages=False, read_message_history=True)
+
+        new_name = f"closed-{channel.name}"[:100]
+        await channel.edit(name=new_name, overwrites=overwrites, reason=f"Ticket kapatıldı: {member}")
+
+        # 2. Transkript kanalına özet embed gönder
+        if TRANSCRIPT_CHANNEL_ID:
+            transcript_ch = guild.get_channel(TRANSCRIPT_CHANNEL_ID)
+            if transcript_ch:
+                # Topic'ten açanı bul
+                opener_mention = "Bilinmiyor"
+                if channel.topic:
+                    import re as _re
+                    m = _re.search(r"Açan: .+ \((\d+)\)", channel.topic)
+                    if m:
+                        opener_mention = f"<@{m.group(1)}>"
+
+                ticket_type = "Bilinmiyor"
+                if channel.topic:
+                    m2 = _re.search(r"Ticket türü: (.+?) \|", channel.topic)
+                    if m2:
+                        ticket_type = m2.group(1)
+
+                embed = discord.Embed(
+                    title="🔒 Ticket Arşivlendi",
+                    color=discord.Color.red(),
+                    timestamp=discord.utils.utcnow(),
+                )
+                embed.add_field(name="Ticket", value=channel.mention, inline=True)
+                embed.add_field(name="Tür", value=ticket_type, inline=True)
+                embed.add_field(name="Açan", value=opener_mention, inline=True)
+                embed.add_field(name="Kapatan", value=member.mention, inline=True)
+                embed.set_footer(text=f"Kanal: {new_name}")
+                await transcript_ch.send(embed=embed)
+
+        await channel.send("🔒 This ticket has been closed and archived.")
 
 
 class TicketPanelView(discord.ui.View):
