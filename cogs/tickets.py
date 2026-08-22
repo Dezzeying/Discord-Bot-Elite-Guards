@@ -32,7 +32,7 @@ class CloseTicketView(discord.ui.View):
         super().__init__(timeout=None)
 
     @discord.ui.button(
-        label="Ticket'ı Kapat",
+        label="Close Ticket",
         style=discord.ButtonStyle.danger,
         emoji="🔒",
         custom_id="ticket_close",
@@ -44,14 +44,14 @@ class CloseTicketView(discord.ui.View):
 
         if not (has_role or is_opener or member.guild_permissions.administrator):
             await interaction.response.send_message(
-                "Bu ticket'ı kapatma yetkin yok.", ephemeral=True
+                "You don't have permission to close this ticket.", ephemeral=True
             )
             return
 
-        await interaction.response.send_message("Ticket 5 saniye içinde kapatılıyor...")
+        await interaction.response.send_message("Closing this ticket in 5 seconds...")
         await interaction.channel.edit(name=f"closed-{interaction.channel.name}"[:100])
         await discord.utils.sleep_until(discord.utils.utcnow() + datetime.timedelta(seconds=5))
-        await interaction.channel.delete(reason=f"Ticket kapatıldı: {member}")
+        await interaction.channel.delete(reason=f"Ticket closed by: {member}")
 
 
 class TicketPanelView(discord.ui.View):
@@ -67,14 +67,14 @@ class TicketPanelView(discord.ui.View):
 
         if not TICKET_CATEGORY_ID:
             await interaction.response.send_message(
-                "Ticket kategorisi ayarlanmamış (TICKET_CATEGORY_ID eksik).", ephemeral=True
+                "Ticket category is not configured (TICKET_CATEGORY_ID missing).", ephemeral=True
             )
             return
 
         category = guild.get_channel(TICKET_CATEGORY_ID)
         if category is None:
             await interaction.response.send_message(
-                "Ticket kategorisi bulunamadı, yöneticiye bildir.", ephemeral=True
+                "Ticket category not found, please notify an admin.", ephemeral=True
             )
             return
 
@@ -83,7 +83,7 @@ class TicketPanelView(discord.ui.View):
         existing = discord.utils.get(category.text_channels, name=channel_name)
         if existing:
             await interaction.response.send_message(
-                f"Zaten açık bir ticket'ın var: {existing.mention}", ephemeral=True
+                f"You already have an open ticket: {existing.mention}", ephemeral=True
             )
             return
 
@@ -109,14 +109,15 @@ class TicketPanelView(discord.ui.View):
         embed = discord.Embed(
             title=f"{label}",
             description=(
-                f"Hoş geldin {member.mention}! Talebini buraya yazabilirsin.\n"
-                f"İlgili ekip en kısa sürede yanıt verecek. İşin bitince aşağıdaki butonla kapatabilirsin."
+                f"Welcome {member.mention}! You can write your request here.\n"
+                f"The relevant staff will respond as soon as possible. You can close this ticket "
+                f"with the button below once you're done."
             ),
             color=discord.Color.blurple(),
         )
         await channel.send(embed=embed, view=CloseTicketView())
         await interaction.response.send_message(
-            f"Ticket'ın açıldı: {channel.mention}", ephemeral=True
+            f"Your ticket has been created: {channel.mention}", ephemeral=True
         )
 
     @discord.ui.button(label="Klan Başvuru", style=discord.ButtonStyle.success, emoji="📝", custom_id="ticket_klan_basvuru")
@@ -150,18 +151,18 @@ class Tickets(commands.Cog):
         embed = discord.Embed(
             title="Elite Guards — Applications & Support",
             description=(
-                "Sana uygun butona tıklayarak ticket açabilirsin. Ticket'ını sadece sen ve ilgili "
-                "ekip görebilir.\n\n"
-                "📝 **Klan Başvuru** — Klana katılmak için\n"
-                "🎯 **Merc Application** — Scrim/maç için merc talebi\n"
-                "🤝 **Clan Representative** — Temsilcilik başvurusu\n"
-                "⚔️ **Match Application** — Maç ayarlamak için"
+                "Select the button below that fits you to open a ticket. Only you and the "
+                "relevant staff can see your ticket.\n\n"
+                "📝 **Klan Başvuru** — To join the clan\n"
+                "🎯 **Merc Application** — Request a merc for scrims/matches\n"
+                "🤝 **Clan Representative** — Representative application\n"
+                "⚔️ **Match Application** — To arrange a match"
             ),
             color=discord.Color.dark_teal(),
         )
         embed.set_footer(text="Elite Guards")
         await interaction.channel.send(embed=embed, view=TicketPanelView())
-        await interaction.response.send_message("Panel gönderildi.", ephemeral=True)
+        await interaction.response.send_message("Panel sent.", ephemeral=True)
 
 
 async def setup(bot: commands.Bot):
