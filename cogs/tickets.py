@@ -8,12 +8,11 @@ from discord.ext import commands
 TICKET_CATEGORY_ID = int(os.getenv("TICKET_CATEGORY_ID", "0") or 0)
 KLAN_BASVURU_ROLE_ID = int(os.getenv("KLAN_BASVURU_ROLE_ID", "0") or 0)
 DIGER_TICKET_ROLE_ID = int(os.getenv("DIGER_TICKET_ROLE_ID", "0") or 0)
-TRANSCRIPT_CHANNEL_ID = int(os.getenv("TRANSCRIPT_CHANNEL_ID", "0") or 0)
+TRANSCRIPT_CATEGORY_ID = int(os.getenv("TRANSCRIPT_CATEGORY_ID", "0") or 0)
 
 # Arşivlenmiş ticket'ı görebilecek yönetim rolleri
 ARCHIVE_ROLE_IDS = [999997810546065468, 1410015083131572354, 1529625416724250734]
 
-# Buton id -> (görünen ad, kanal öneki, o türü görecek rol id'si)
 TICKET_TYPES = {
     "ticket_klan_basvuru": ("Klan Başvuru", "klan", KLAN_BASVURU_ROLE_ID),
     "ticket_merc": ("Merc Application", "merc", DIGER_TICKET_ROLE_ID),
@@ -23,14 +22,87 @@ TICKET_TYPES = {
 
 
 def slugify(name: str) -> str:
-    """Discord kanal adı için kullanıcı adını sadeleştirir."""
     name = name.lower()
     name = re.sub(r"[^a-z0-9-]", "", name.replace(" ", "-"))
     return name[:20] or "kullanici"
 
 
+class TicketArchiveView(discord.ui.View):
+    """Ticket kapatılınca gelen Transcript / Open / Delete butonları."""
+
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @discord.ui.button(label="Transcript", style=discord.ButtonStyle.secondary, emoji="📋", custom_id="archive_transcript")
+    async def transcript(self, interaction: discord.Interaction, button: discord.ui.Button):
+        channel = interaction.channel
+        messages = []
+        async for msg in channel.history(limit=500, oldest_first=True):
+            if msg.author.bot and not msg.embeds:
+                continue
+            ts = msg.created_at.strftime("%d.%m.%Y %H:%M")
+            content = msg.content or ""
+            if msg.embeds:
+                for e in msg.embeds:
+                    content += f"[EMBED: {e.title or ''} — {e.description or ''}]"
+            messages.append(f"[{ts}] {msg.author.display_name}: {content}")
+
+        text = "\n".join(messages) or "Mesaj bulunamadı."
+        file = discord.File(
+            fp=__import__("io").BytesIO(text.encode("utf-8")),
+            filename=f"transcript-{channel.name}.txt"
+        )
+        await interaction.response.send_message(file=file, ephemeral=True)
+
+    @discord.ui.button(label="Open", style=discord.ButtonStyle.success, emoji="🔓", custom_id="archive_open")
+    async def open_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
+        member = interaction.user
+        has_role = any(r.id in ARCHIVE_ROLE_IDS for r in getattr(member, "roles", []))
+        if not (has_role or member.guild_permissions.administrator):
+            await interaction.response.send_message("Bu işlem için yetkin yok.", ephemeral=True)
+            return
+
+        guild = interaction.guild
+        channel = interaction.channel
+
+        # Orijinal kategoriyi bul ve geri taşı
+        ticket_category = guild.get_channel(TICKET_CATEGORY_ID)
+        overwrites = {
+            guild.default_role: discord.PermissionOverwrite(view_channel=False),
+            guild.me: discord.PermissionOverwrite(view_channel=True, send_messages=True, manage_channels=True),
+        }
+        # Topic'ten açan kişiyi bul ve iznini geri ver
+        if channel.topic:
+            m = re.search(r"Açan: .+ \((\d+)\)", channel.topic)
+            if m:
+                opener = guild.get_member(int(m.group(1)))
+                if opener:
+                    overwrites[opener] = discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True)
+
+        new_name = channel.name.removeprefix("closed-")
+        await channel.edit(
+            name=new_name,
+            category=ticket_category,
+            overwrites=overwrites,
+            reason=f"Ticket yeniden açıldı: {member}"
+        )
+        await interaction.response.send_message(f"✅ Ticket yeniden açıldı: {channel.mention}", ephemeral=True)
+
+    @discord.ui.button(label="Delete", style=discord.ButtonStyle.danger, emoji="🗑️", custom_id="archive_delete")
+    async def delete_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
+        member = interaction.user
+        has_role = any(r.id in ARCHIVE_ROLE_IDS for r in getattr(member, "roles", []))
+        if not (has_role or member.guild_permissions.administrator):
+            await interaction.response.send_message("Bu işlem için yetkin yok.", ephemeral=True)
+            return
+
+        await interaction.response.send_message("🗑️ Kanal 3 saniye içinde siliniyor...", ephemeral=True)
+        await discord.utils.sleep_until(discord.utils.utcnow() + datetime.timedelta(seconds=3))
+        await interaction.channel.delete(reason=f"Ticket silindi: {member}")
+
+
 class CloseTicketView(discord.ui.View):
-    """Ticket kanalı içindeki 'Kapat' butonu. Bot yeniden başlasa da persistent çalışsın diye timeout=None."""
+    """Ticket kanalı içindeki Close Ticket butonu."""
 
     def __init__(self):
         super().__init__(timeout=None)
@@ -57,7 +129,21 @@ class CloseTicketView(discord.ui.View):
 
         await interaction.response.defer()
 
-        # 1. Kanalı kilitle ve sadece yönetim rollerine bırak
+        # Ticket türü ve açan kişiyi topic'ten çek
+        ticket_type = "Bilinmiyor"
+        opener_mention = "Bilinmiyor"
+        opener_id = None
+        if channel.topic:
+            m1 = re.search(r"Ticket türü: (.+?) \|", channel.topic)
+            if m1:
+                ticket_type = m1.group(1)
+            m2 = re.search(r"Açan: .+ \((\d+)\)", channel.topic)
+            if m2:
+                opener_id = int(m2.group(1))
+                opener_mention = f"<@{opener_id}>"
+
+        # Transkript kategorisine taşı + kilitle
+        transcript_category = guild.get_channel(TRANSCRIPT_CATEGORY_ID)
         overwrites = {
             guild.default_role: discord.PermissionOverwrite(view_channel=False),
             guild.me: discord.PermissionOverwrite(view_channel=True, send_messages=True, manage_channels=True),
@@ -65,42 +151,49 @@ class CloseTicketView(discord.ui.View):
         for role_id in ARCHIVE_ROLE_IDS:
             role = guild.get_role(role_id)
             if role:
-                overwrites[role] = discord.PermissionOverwrite(view_channel=True, send_messages=False, read_message_history=True)
+                overwrites[role] = discord.PermissionOverwrite(
+                    view_channel=True, send_messages=False, read_message_history=True
+                )
 
         new_name = f"closed-{channel.name}"[:100]
-        await channel.edit(name=new_name, overwrites=overwrites, reason=f"Ticket kapatıldı: {member}")
+        await channel.edit(
+            name=new_name,
+            category=transcript_category,
+            overwrites=overwrites,
+            reason=f"Ticket kapatıldı: {member}"
+        )
 
-        # 2. Transkript kanalına özet embed gönder
-        if TRANSCRIPT_CHANNEL_ID:
-            transcript_ch = guild.get_channel(TRANSCRIPT_CHANNEL_ID)
-            if transcript_ch:
-                # Topic'ten açanı bul
-                opener_mention = "Bilinmiyor"
-                if channel.topic:
-                    import re as _re
-                    m = _re.search(r"Açan: .+ \((\d+)\)", channel.topic)
-                    if m:
-                        opener_mention = f"<@{m.group(1)}>"
+        # Kanal içine kapanma mesajı + butonlar
+        close_embed = discord.Embed(
+            title="🔒 Ticket Closed",
+            description=f"**Ticket Closed by** {member.mention}",
+            color=discord.Color.red(),
+            timestamp=discord.utils.utcnow(),
+        )
+        await channel.send(embed=close_embed, view=TicketArchiveView())
 
-                ticket_type = "Bilinmiyor"
-                if channel.topic:
-                    m2 = _re.search(r"Ticket türü: (.+?) \|", channel.topic)
-                    if m2:
-                        ticket_type = m2.group(1)
-
-                embed = discord.Embed(
-                    title="🔒 Ticket Arşivlendi",
-                    color=discord.Color.red(),
+        # Transkript kanalına özet embed — kategori altında bir kanal olmalı
+        # Özet embed'i transcript kategorisinin ilk text kanalına gönder
+        if transcript_category:
+            # Transcript kanalı olarak TRANSCRIPT_CATEGORY_ID altındaki ilk "transkript" adlı kanalı veya ilk text kanalını bul
+            log_ch = discord.utils.find(
+                lambda c: isinstance(c, discord.TextChannel) and "transkript" in c.name.lower(),
+                transcript_category.channels
+            ) or discord.utils.find(
+                lambda c: isinstance(c, discord.TextChannel),
+                transcript_category.channels
+            )
+            if log_ch:
+                summary = discord.Embed(
+                    title="📁 Ticket Arşivlendi",
+                    color=discord.Color.orange(),
                     timestamp=discord.utils.utcnow(),
                 )
-                embed.add_field(name="Ticket", value=channel.mention, inline=True)
-                embed.add_field(name="Tür", value=ticket_type, inline=True)
-                embed.add_field(name="Açan", value=opener_mention, inline=True)
-                embed.add_field(name="Kapatan", value=member.mention, inline=True)
-                embed.set_footer(text=f"Kanal: {new_name}")
-                await transcript_ch.send(embed=embed)
-
-        await channel.send("🔒 This ticket has been closed and archived.")
+                summary.add_field(name="Kanal", value=channel.mention, inline=True)
+                summary.add_field(name="Tür", value=ticket_type, inline=True)
+                summary.add_field(name="Açan", value=opener_mention, inline=True)
+                summary.add_field(name="Kapatan", value=member.mention, inline=True)
+                await log_ch.send(embed=summary)
 
 
 class TicketPanelView(discord.ui.View):
@@ -156,7 +249,6 @@ class TicketPanelView(discord.ui.View):
         )
 
         if custom_id == "ticket_klan_basvuru":
-            # Rol ve üyeyi etiketle
             ping_msg = f"<@&{KLAN_BASVURU_ROLE_ID}> {member.mention}"
             await channel.send(ping_msg)
 
@@ -214,12 +306,11 @@ class TicketPanelView(discord.ui.View):
 
 
 class Tickets(commands.Cog):
-    """Başvuru/Support ticket sistemi (Klan Başvuru, Merc, Temsilci, Maç Başvurusu)."""
-
     def __init__(self, bot: commands.Bot):
         self.bot = bot
         self.bot.add_view(TicketPanelView())
         self.bot.add_view(CloseTicketView())
+        self.bot.add_view(TicketArchiveView())
 
     @app_commands.command(name="ticket-panel", description="Ticket açma panelini bu kanala gönder")
     @app_commands.checks.has_permissions(administrator=True)
