@@ -106,16 +106,43 @@ class TicketPanelView(discord.ui.View):
             reason=f"{label} ticket'ı - {member}",
         )
 
-        embed = discord.Embed(
-            title=f"{label}",
-            description=(
-                f"Welcome {member.mention}! You can write your request here.\n"
-                f"The relevant staff will respond as soon as possible. You can close this ticket "
-                f"with the button below once you're done."
-            ),
-            color=discord.Color.blurple(),
-        )
-        await channel.send(embed=embed, view=CloseTicketView())
+        if custom_id == "ticket_klan_basvuru":
+            # Rol ve üyeyi etiketle
+            ping_msg = f"<@&{KLAN_BASVURU_ROLE_ID}> {member.mention}"
+            await channel.send(ping_msg)
+
+            embed = discord.Embed(
+                title="🛡️ Klan Başvurusu",
+                description=(
+                    f"Hoş geldin {member.mention}! Başvurunu değerlendirebilmemiz için "
+                    f"aşağıdaki bilgileri eksiksiz doldurmanı rica ediyoruz.\n\n"
+                    f"**Lütfen sırasıyla yanıtla:**\n\n"
+                    f"🔢 **SteamID64**\n"
+                    f"👤 **İsim** *(gerçek adın veya bilinen adın)*\n"
+                    f"🎮 **Oyun İçi Nick**\n"
+                    f"⏱️ **Squad Oyun Saati** *(kaç saat?)*\n"
+                    f"📅 **Günlük Aktiflik Süresi** *(ortalama kaç saat/gün?)*\n"
+                    f"🏴 **Daha Önce Katıldığın Klanlar** *(yoksa 'Yok' yaz)*\n"
+                    f"🔗 **Steam Profil Linki**\n\n"
+                    f"Başvurun incelenecek ve en kısa sürede geri dönüş yapılacaktır. "
+                    f"Ticket'ı kapatmak için aşağıdaki butonu kullanabilirsin."
+                ),
+                color=discord.Color.from_rgb(34, 139, 34),
+            )
+            embed.set_footer(text="Elite Guards • Klan Başvurusu")
+            await channel.send(embed=embed, view=CloseTicketView())
+        else:
+            embed = discord.Embed(
+                title=f"{label}",
+                description=(
+                    f"Welcome {member.mention}! You can write your request here.\n"
+                    f"The relevant staff will respond as soon as possible. You can close this ticket "
+                    f"with the button below once you're done."
+                ),
+                color=discord.Color.blurple(),
+            )
+            await channel.send(embed=embed, view=CloseTicketView())
+
         await interaction.response.send_message(
             f"Your ticket has been created: {channel.mention}", ephemeral=True
         )
