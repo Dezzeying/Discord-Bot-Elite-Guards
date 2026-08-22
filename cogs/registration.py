@@ -77,6 +77,17 @@ class Registration(commands.Cog):
 
         await interaction.followup.send(embed=embed, ephemeral=False)
 
+        # Mentorluk forum sayfası aç
+        mentorship_cog = interaction.client.cogs.get("Mentorship")
+        if mentorship_cog:
+            await mentorship_cog.create_mentorship_post(
+                guild=interaction.guild,
+                uye=uye,
+                isim=isim,
+                nick=nick,
+                kaydeden=interaction.user,
+            )
+
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(Registration(bot))
