@@ -158,13 +158,63 @@ class UpdateListView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
 
-    @discord.ui.button(label="🔄 Güncelle", style=discord.ButtonStyle.primary, custom_id="steamid_guncelle")
-    async def guncelle(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.defer()
+    @discord.ui.button(label="🔍 Tara & Güncelle", style=discord.ButtonStyle.primary, custom_id="steamid_tara")
+    async def tara(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.defer(ephemeral=True)
+        guild = interaction.guild
+        bot = interaction.client
+
+        eklenen = []
+        silinen = []
+
+        # 1. DB'deki üyeleri kontrol et — rolü olmayanları sil
+        conn = get_db()
+        rows = conn.execute('SELECT steamid, isim FROM members').fetchall()
+        conn.close()
+
+        steamid_cog = bot.cogs.get("SteamID")
+
+        for row in rows:
+            # isimden Discord üyesini bul (nick formatı: EG-R | İsim / Nick)
+            isim_parcala = row["isim"].split(" / ")
+            isim_ara = isim_parcala[0].strip() if isim_parcala else row["isim"]
+
+            uye = discord.utils.find(
+                lambda m: isim_ara.lower() in m.display_name.lower(),
+                guild.members
+            )
+            if uye:
+                role_ids = {r.id for r in uye.roles}
+                if MEMBER_ROLE_ID and MEMBER_ROLE_ID not in role_ids:
+                    remove_member_by_steamid(row["steamid"])
+                    silinen.append(f"{row['isim']} (`{row['steamid']}`)")
+
+        # 2. Klan başvuru ticket kanallarını tara — eksik SteamID'leri ekle
+        if steamid_cog:
+            for channel in guild.text_channels:
+                if not channel.topic or "Klan Başvuru" not in channel.topic:
+                    continue
+                result = await steamid_cog.add_from_ticket(channel)
+                if result:
+                    eklendi, steamid, isim_str = result
+                    if eklendi:
+                        eklenen.append(f"{isim_str} (`{steamid}`)")
+
+        # 3. Listeyi güncelle
         members = get_all_members()
         embed = build_embed(members)
-        await interaction.message.edit(embed=embed, view=self)
-        await interaction.followup.send(f"✅ Liste güncellendi — {len(members)} üye.", ephemeral=True)
+        await interaction.message.edit(embed=embed, view=UpdateListView())
+
+        # Özet mesaj
+        ozet = f"✅ **Tarama tamamlandı** — {len(members)} üye\n"
+        if eklenen:
+            ozet += f"\n**Eklenenler ({len(eklenen)}):**\n" + "\n".join(eklenen)
+        if silinen:
+            ozet += f"\n**Silinenler ({len(silinen)}):**\n" + "\n".join(silinen)
+        if not eklenen and not silinen:
+            ozet += "\nDeğişiklik yok."
+
+        await interaction.followup.send(ozet, ephemeral=True)
 
 
 class SteamID(commands.Cog):
