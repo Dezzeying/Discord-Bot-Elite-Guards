@@ -33,12 +33,12 @@ def init_db():
     conn.close()
 
 
-def add_member(steamid: str, isim: str) -> bool:
+def add_member(steamid: str, isim: str, discord_id: str = None) -> bool:
     try:
         conn = get_db()
         conn.execute(
-            'INSERT INTO members (steamid, isim, durum, eklenme_tarihi) VALUES (?, ?, "aktif", datetime("now"))',
-            (steamid, isim)
+            'INSERT INTO members (steamid, isim, durum, eklenme_tarihi, discord_id) VALUES (?, ?, "aktif", datetime("now"), ?)',
+            (steamid, isim, discord_id)
         )
         conn.commit()
         conn.close()
@@ -175,19 +175,14 @@ class UpdateListView(discord.ui.View):
         steamid_cog = bot.cogs.get("SteamID")
 
         for row in rows:
-            # isimden Discord üyesini bul (nick formatı: EG-R | İsim / Nick)
-            isim_parcala = row["isim"].split(" / ")
-            isim_ara = isim_parcala[0].strip() if isim_parcala else row["isim"]
-
-            uye = discord.utils.find(
-                lambda m: isim_ara.lower() in m.display_name.lower(),
-                guild.members
-            )
-            if uye:
-                role_ids = {r.id for r in uye.roles}
-                if MEMBER_ROLE_ID and MEMBER_ROLE_ID not in role_ids:
-                    remove_member_by_steamid(row["steamid"])
-                    silinen.append(f"{row['isim']} (`{row['steamid']}`)")
+            discord_id = row["discord_id"]
+            if discord_id:
+                uye = guild.get_member(int(discord_id))
+                if uye:
+                    role_ids = {r.id for r in uye.roles}
+                    if MEMBER_ROLE_ID and MEMBER_ROLE_ID not in role_ids:
+                        remove_member_by_steamid(row["steamid"])
+                        silinen.append(f"{row['isim']} (`{row['steamid']}`)")
 
         # 2. Klan başvuru ticket kanallarını tara — eksik SteamID'leri ekle
         if steamid_cog:
@@ -231,18 +226,11 @@ class SteamID(commands.Cog):
         before_ids = {r.id for r in before.roles}
         after_ids = {r.id for r in after.roles}
 
-        # Rol alındıysa (öncede vardı, şimdi yok)
         if MEMBER_ROLE_ID in before_ids and MEMBER_ROLE_ID not in after_ids:
-            # Discord ID'ye göre DB'de eşleşen steamid'i bul (şimdilik isimle ara)
             conn = get_db()
-            # Üyenin nick'inden isim çıkar (EG-R | İsim / Nick formatı)
-            nick = after.display_name
-            m = re.search(r"EG-R?\s*\|\s*(.+)", nick)
-            isim_ara = m.group(1).strip() if m else nick.strip()
-
             row = conn.execute(
-                'SELECT steamid FROM members WHERE isim LIKE ?',
-                (f"%{isim_ara.split('/')[0].strip()}%",)
+                'SELECT steamid FROM members WHERE discord_id = ?',
+                (str(after.id),)
             ).fetchone()
             conn.close()
 

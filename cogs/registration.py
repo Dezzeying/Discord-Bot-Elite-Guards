@@ -87,6 +87,20 @@ class Registration(commands.Cog):
 
         await interaction.followup.send(embed=embed, ephemeral=False)
 
+        # SteamID listesinde discord_id eşleştir
+        steamid_cog = interaction.client.cogs.get("SteamID")
+        if steamid_cog:
+            conn = steamid_cog.get_db() if hasattr(steamid_cog, "get_db") else None
+            if conn is None:
+                import sqlite3 as _sq
+                conn = _sq.connect("steamids.db")
+            conn.execute(
+                "UPDATE members SET discord_id = ? WHERE isim LIKE ?",
+                (str(uye.id), f"%{isim}%")
+            )
+            conn.commit()
+            conn.close()
+
         # Mentorluk forum sayfası aç
         mentorship_cog = interaction.client.cogs.get("Mentorship")
         if mentorship_cog:
