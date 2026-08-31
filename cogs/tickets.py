@@ -163,6 +163,12 @@ class CloseTicketView(discord.ui.View):
             reason=f"Ticket kapatıldı: {member}"
         )
 
+        # Klan başvurusuysa SteamID + isim çek ve listeye ekle
+        if "Klan Başvuru" in ticket_type:
+            steamid_cog = self.bot.cogs.get("SteamID")
+            if steamid_cog:
+                await steamid_cog.add_from_ticket(channel)
+
         # Kanal içine kapanma mesajı + butonlar
         close_embed = discord.Embed(
             title="🔒 Ticket Closed",
