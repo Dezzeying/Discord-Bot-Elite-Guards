@@ -56,13 +56,23 @@ class Registration(commands.Cog):
                 role = interaction.guild.get_role(role_id)
                 if role:
                     roller.append(role)
+                else:
+                    await interaction.followup.send(
+                        f"⚠️ Rol bulunamadı: `{role_id}` — ID doğru mu?", ephemeral=True
+                    )
+                    return
 
         if roller:
             try:
                 await uye.add_roles(*roller, reason=f"Kayıt: {interaction.user}")
             except discord.Forbidden:
                 await interaction.followup.send(
-                    f"⚠️ Roller eklenemedi (yetki sorunu).", ephemeral=True
+                    f"⚠️ Roller eklenemedi — botun rolü, verilecek rollerden üstte olmalı.", ephemeral=True
+                )
+                return
+            except Exception as e:
+                await interaction.followup.send(
+                    f"⚠️ Beklenmeyen hata: `{e}`", ephemeral=True
                 )
                 return
 
