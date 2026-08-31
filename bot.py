@@ -25,6 +25,7 @@ INITIAL_COGS = [
     "cogs.steamid",
     "cogs.registration",
     "cogs.mentorship",
+    "cogs.reminder",
 ]
 
 
